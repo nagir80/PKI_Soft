@@ -1,0 +1,437 @@
+//---------------------------------------------------------------------------
+
+#include <vcl.h>
+#pragma hdrstop
+//------------------------------------------------------------------------------
+#include <windows.h>
+#include <iostream>
+#include <stdio.h>
+#include <string>
+#include <sstream>
+#include <fstream>
+#include <stdlib>
+#include <System.Classes.hpp>
+//------------------------------------------------------------------------------
+#include "main.h"
+#include "seven.h"
+#include "nine.h"
+#include "sixteen.h"
+#include "thirty_four.h"
+#include "thirty_five.h"
+#include "thirty_six.h"
+#include "stend_pkiPCH1.h"
+#include "stend_pkiPCH1.h"
+#include "BinCharData.h"
+#include "StendData.h"
+//------------------------------------------------------------------------------
+#include "COMTranceiver.h"
+#include "RTCMProtocol.h"
+#include "ITranceiver.h"
+#include "ISettings.h"
+#include "IFileReader.h"
+#include "BCD_Wrap.h";  //!!!!!!!!!!!!!!!!!!
+#include "utils.h"
+#include "BINRProtocol.h"
+#include "BinFileReader.h"
+#include "FileReaderBoot.h"
+#include "RsvThread.h"
+#include "ShortThread.h"
+//------------------------------------------------------------------------------
+#pragma package(smart_init)
+#pragma resource "*.dfm"
+TForm1 *Form1;
+COM_Settings *port;    // Инициализация файла com-порта.
+COM_Tranceiver *comPort_mod;
+COM_Tranceiver *comPort_rec;
+
+HANDLE wrkThread;
+DataPKI *data_PKI;
+COM_Settings *com_mod; // Инициализация com-порта модулятора.
+COM_Settings *com_rec; // Инициализация com-порта приёмника.
+
+RTCMProtocol *rtcm_pr;
+DataPKI* DP;
+
+HANDLE mutx;
+HANDLE mutx2;
+
+int click_rate1 = 0; // Фиксация конпки Частота (1 канал) 0-отжата 1-нажата
+int click_rate2 = 0; // Фиксация конпки Частота (2 канал) 0-отжата 1-нажата
+
+void form_76(BinCharData *bchar_data);
+//--------------------form_7C_1 - form_7C_4-------------------------------------
+extern void form_7C_1(BinCharData *bchar_data);
+extern void form_7C_2(BinCharData *bchar_data);
+extern void form_7C_3(BinCharData *bchar_data);
+extern void form_7C_4(BinCharData *bchar_data);
+//---------------------------------------------------------------------------
+__fastcall TForm1::TForm1(TComponent* Owner)
+	: TForm(Owner)
+{}
+//---------------------------------------------------------------------------
+
+
+void __fastcall TForm1::Button5Click(TObject *Sender)
+{   Form2->Show();
+}
+//---------------------------------------------------------------------------
+
+void __fastcall TForm1::Button6Click(TObject *Sender)
+{   Form3->Show();
+}
+//---------------------------------------------------------------------------
+
+void __fastcall TForm1::Button7Click(TObject *Sender)
+{   Form4->Show();
+}
+//---------------------------------------------------------------------------
+
+void __fastcall TForm1::Button2Click(TObject *Sender)
+{   Form1->Close();
+}
+//---------------------------------------------------------------------------
+
+void __fastcall TForm1::Button8Click(TObject *Sender)
+{   Form5->Show();
+}
+//---------------------------------------------------------------------------
+
+
+void __fastcall TForm1::Button9Click(TObject *Sender)
+{   Form6->Show();
+}
+//---------------------------------------------------------------------------
+
+void __fastcall TForm1::Button10Click(TObject *Sender)
+{   Form7->Show();
+}
+//---------------------------------------------------------------------------
+
+//------------------------------------------------------------------------------
+DWORD WINAPI workProc_mod(LPVOID lpParameter)
+{   char *hhhm = 0;
+	short indexm = 0;
+	std::string *form_strm;
+	while(1)
+		{   short lm = comPort_mod->getSizeRd();
+			if (lm > 0)
+			  {   hhhm = new char[100];
+				  form_strm = new  std::string();
+				  comPort_mod->getFromRdBuf(hhhm, lm);
+				  form_strm->clear();
+				  form_strm->append(hhhm,lm);
+				  delete[] hhhm;
+				  Form1->Memo1->Lines->Text = Form1->Memo1->Lines->Text
+				  + form_strm->c_str();
+				  delete form_strm;
+			  }
+			Sleep(1);
+		}
+}
+//------------------------------------------------------------------------------
+
+//------------------------------------------------------------------------------
+DWORD WINAPI workProc_rec(LPVOID lpParameter)
+{   char *hhhr = 0;
+	short indexr = 0;
+	std::string *form_strr;
+	while(1)
+		{   short lr = comPort_rec->getSizeRd();
+			if (lr > 0)
+			  {   hhhr = new char[100];
+				  form_strr = new  std::string();
+				  comPort_rec->getFromRdBuf(hhhr, lr);
+				  form_strr->clear();
+				  form_strr->append(hhhr,lr);
+				  delete[] hhhr;
+				  Form1->Memo2->Lines->Text = Form1->Memo2->Lines->Text
+				  + form_strr->c_str();
+				  delete form_strr;
+			  }
+			Sleep(1);
+		}
+}
+//------------------------------------------------------------------------------
+
+void __fastcall TForm1::FormCreate(TObject *Sender)
+{   Label8->Caption = "      1";
+	Label9->Caption = "     000 ";
+//-----------Запись активных com-портов в массив com_ports----------------------
+	String com_ports[100] = {0};
+	TStringList * ss = new TStringList;
+	ss->AddStrings(COM_Settings::all_ports());
+	int i = 0;
+	while(i < ss->Count)
+	{	com_ports[i] = ss->Strings[i];
+		i++;
+	}
+//---Создаём объект (COM_Settings(для инициализации файла настройки портов))----
+
+	port = new COM_Settings(new RTCMProtocol(),com_ports[0].c_str(),Utils::indexToBaudes(3),
+	Utils::indexToDb(3),Utils::indexToPar(0),
+	Utils::indexToSb(0),Utils::indexToFc(0));
+
+//-----------------------------end----------------------------------------------
+
+//-------------------------Файл инициализации-----------------------------------
+	int value = port->initialization_file(com_ports,ss->Count);
+	switch(value)
+	{   case 0: MessageBox ( NULL, L"Не возможно открыть файл настройки COM-портов!", L"ERROR", MB_OK );
+				Application->Terminate();
+		case 1: MessageBox ( NULL, L"Модулятору и Приёмнику назначены неправильные COM-порты!", L"ERROR", MB_OK );
+				Application->Terminate();
+		case 2: MessageBox ( NULL, L"Приёмнику назначен неправильный COM-порт!", L"ERROR", MB_OK );
+				Application->Terminate();
+		case 3:
+				break;
+		case 4: MessageBox ( NULL, L"Модулятору назначен неправильный COM-порт!", L"ERROR", MB_OK );
+				Application->Terminate();
+		case 5: MessageBox ( NULL, L"Все значения COM-портов Модулятора и Приёмника заданы по умолчанию.", L"!!!", MB_OK );
+				break;
+		case 6: MessageBox ( NULL, L"Модулятору и Приёмнику назначены одинаковые COM-порты.", L"ERROR", MB_OK );
+				Application->Terminate();
+	}
+	delete ss;
+	delete port;
+	mutx = CreateMutex(NULL, FALSE, (const wchar_t*)"fm1");
+	mutx2 = CreateMutex(NULL, FALSE, (const wchar_t*)"fm1");
+	Button4->Enabled = true;
+}
+
+
+
+//-----------------------------end----------------------------------------------
+void __fastcall TForm1::Button4Click(TObject *Sender)
+{
+
+
+
+	   FILE* fp;
+		if((fp = fopen("stend.ini","r")) == NULL)
+		   MessageBox ( NULL, L"Не возможно открыть файл!", L"ERROR", MB_OK );
+		AnsiString COM_modulator = 0;     // COM-порт модулятора.
+		int speed_mod[1] = {0};           // Скорость модулятора.
+		int data_bits_mod[1] = {0};       // Биты данных модулятора.
+		int parity_mod[1] = {0};          // Чётность модулятора.
+		int stop_bits_mod[1] = {0};       // Стоповые биты модулятора.
+		int flow_control_mod[1] = {0};    // Управление потоком модулятора.
+
+		fseek(fp,46,SEEK_SET);
+		fscanf(fp,"\n%s",COM_modulator.c_str());
+
+		int size_mod = COM_modulator.WideCharBufSize();
+		wchar_t* COM_modulator_ = new wchar_t[size_mod];
+		COM_modulator.WideChar(COM_modulator_,size_mod);
+
+		fseek(fp,12,SEEK_CUR);
+		fscanf(fp,"\n%d",speed_mod);
+		fseek(fp,15,SEEK_CUR);
+		fscanf(fp,"\n%d",data_bits_mod);
+		fseek(fp,12,SEEK_CUR);
+		fscanf(fp,"\n%d",parity_mod);
+		fseek(fp,17,SEEK_CUR);
+		fscanf(fp,"\n%d",stop_bits_mod);
+		fseek(fp,21,SEEK_CUR);
+		fscanf(fp,"\n%d",flow_control_mod);
+ /*
+		com_mod = new COM_Settings(new RTCMProtocol(),
+		COM_modulator_,
+		Utils::intToBaudes(speed_mod[0]),
+		Utils::indexToDb(data_bits_mod[0]),
+		Utils::indexToPar(parity_mod[0]),
+		Utils::indexToSb(stop_bits_mod[0]),
+		Utils::indexToFc(flow_control_mod[0]));
+
+		delete[]COM_modulator_;
+
+		comPort_mod = new COM_Tranceiver(com_mod);
+
+		if (comPort_mod->getResult() != 0)
+		{   TCHAR buf_mod[100];
+			_stprintf(buf_mod, _T("%d"), comPort_mod->getResult());
+			MessageBox ( NULL, buf_mod , L"ComPortmod", MB_OK );
+		}
+		else
+		  {   char *res_mod = new char[100];
+			  memcpy(res_mod, com_mod->print(), 100);
+			  Form1->Memo1->Font->Color = clRed;
+			  Form1->Memo1->Lines->Add("=== P O R T  I S  O P E N E D ===");
+			  Form1->Memo1->Font->Color = clBlack;
+			  Form1->Memo1->Lines->Add(res_mod);
+			  delete[]res_mod;
+			  wrkThread = CreateThread(NULL, 0, workProc_mod, NULL, 0, NULL);
+		  }
+ */
+		//---------------------------------------------------------
+		AnsiString COM_receiver = 0;      // COM-порт приёмника.
+		int speed_rec[1] = {0};           // Скорость приёмника.
+		int data_bits_rec[1] = {0};       // Биты данных приёмника.
+		int parity_rec[1] = {0};          // Чётность приёмника.
+		int stop_bits_rec[1] = {0};       // Стоповые биты приёмника.
+		int flow_control_rec[1] = {0};    // Управление потоком приёмника.
+
+		fseek(fp,47,SEEK_CUR);
+		fscanf(fp,"\n%s",COM_receiver.c_str());
+
+		int size_rec = COM_receiver.WideCharBufSize();
+		wchar_t* COM_receiver_ = new wchar_t[size_rec];
+		COM_receiver.WideChar(COM_receiver_,size_rec);
+
+		fseek(fp,12,SEEK_CUR);
+		fscanf(fp,"\n%d",speed_rec);
+		fseek(fp,15,SEEK_CUR);
+		fscanf(fp,"\n%d",data_bits_rec);
+		fseek(fp,12,SEEK_CUR);
+		fscanf(fp,"\n%d",parity_rec);
+		fseek(fp,17,SEEK_CUR);
+		fscanf(fp,"\n%d",stop_bits_rec);
+		fseek(fp,21,SEEK_CUR);
+		fscanf(fp,"\n%d",flow_control_rec);
+
+		com_rec = new COM_Settings(new BINRProtocol(),
+		COM_receiver_,
+		Utils::intToBaudes(speed_rec[0]),
+		Utils::indexToDb(data_bits_rec[0]),
+		Utils::indexToPar(parity_rec[0]),
+		Utils::indexToSb(stop_bits_rec[0]),
+		Utils::indexToFc(flow_control_rec[0]));
+
+		delete[]COM_receiver_;
+
+		comPort_rec = new COM_Tranceiver(com_rec);
+		if (comPort_rec->getResult() != 0)
+		{   TCHAR buf_rec[100];
+			_stprintf(buf_rec, _T("%d"), comPort_rec->getResult());
+			MessageBox ( NULL, buf_rec , L"ComPortrec", MB_OK );
+		}
+		else
+		  {   char *res_rec = new char[100];
+			  memcpy(res_rec, com_rec->print(), 100);
+			  Form1->Memo2->Font->Color = clRed;
+			  Form1->Memo2->Lines->Add("=== P O R T  I S  O P E N E D ===");
+			  Form1->Memo2->Font->Color = clBlack;
+			  Form1->Memo2->Lines->Add(res_rec);
+
+			  delete[]res_rec;
+			  wrkThread = CreateThread(NULL, 0, workProc_rec, NULL, 0, NULL);
+		  }
+		  char* buf = new char[1000];
+//----------------------------lavr----------------------------------------------
+
+		  int mss1 = StrToInt(Edit9->Text); // Интервал передачи MSS(1 канал)
+		  if(TryStrToInt(Edit9->Text, mss1)) // Проверка на число(1 канал)
+		  {   if(mss1 >= 0 && mss1 <= 255) // Проверка на соответствие диапазону 0-255(1 канал).
+				;
+			  else
+			  {   MessageBox ( NULL, L"Задан не верный диапазон(1 канал)!", L"ERROR", MB_OK );
+				  return;
+			  }
+		  }
+		  else
+		  {    MessageBox ( NULL, L"Введите число(1 канал)!", L"ERROR", MB_OK );
+			   return;
+		  }
+
+		  // 2 канал
+		  int mss2 = StrToInt(Edit10->Text); // Интервал передачи MSS(2 канал)
+		  if(TryStrToInt(Edit10->Text, mss2)) // Проверка на число(2 канал)
+		  {   if(mss2 >= 0 && mss2 <= 255) // Проверка на соответствие диапазону 0-255(2 канал).
+				 ;
+			  else
+			  {   MessageBox ( NULL, L"Задан не верный диапазон(2 канал)!", L"ERROR", MB_OK );
+				  return;
+			  }
+		  }
+		  else
+		  {    MessageBox ( NULL, L"Введите число(2 канал)!", L"ERROR", MB_OK );
+			   return;
+		  }
+		  DP = new DataPKI(speed_rec,speed_mod,mss1,mss2,click_rate1,click_rate2,ComboBox7->ItemIndex,ComboBox9->ItemIndex,ComboBox8->ItemIndex,ComboBox10->ItemIndex);
+
+//------------------------------------------------------------------------------
+////////////////////////////////////////////////////////////////////
+		  comPort_rec->getSettings()->getPrt()->get_bwr()->add(0x76, form_76);
+		  comPort_rec->getSettings()->getPrt()->add_msg(0x76);
+		  comPort_rec->size_wr = comPort_rec->getSettings()->getPrt()->code(comPort_rec->bufwr);
+		  ResumeThread(comPort_rec->getTrHandle());
+		 // delete[] bchar_data;
+		  Sleep(10);
+
+////////////////////////////////////////////////////////////////////////////////
+//0x7c_1
+		  comPort_rec->getSettings()->getPrt()->get_bwr()->add(0x17C, form_7C_1);
+		  comPort_rec->getSettings()->getPrt()->add_msg(0x17C);
+		  comPort_rec->size_wr = comPort_rec->getSettings()->getPrt()->code(comPort_rec->bufwr);
+		  ResumeThread(comPort_rec->getTrHandle());
+		  Sleep(10);
+////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////
+
+//0x7c_2
+		  comPort_rec->getSettings()->getPrt()->get_bwr()->add(0x27C, form_7C_2);
+		  comPort_rec->getSettings()->getPrt()->add_msg(0x27C);
+		  comPort_rec->size_wr = comPort_rec->getSettings()->getPrt()->code(comPort_rec->bufwr);
+		  ResumeThread(comPort_rec->getTrHandle());
+		  Sleep(10);
+////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////
+//0x7c_3
+		  comPort_rec->getSettings()->getPrt()->get_bwr()->add(0x37C, form_7C_3);
+		  comPort_rec->getSettings()->getPrt()->add_msg(0x37C);
+		  comPort_rec->size_wr = comPort_rec->getSettings()->getPrt()->code(comPort_rec->bufwr);
+		  ResumeThread(comPort_rec->getTrHandle());
+		  Sleep(10);
+////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////
+//0x7c_4
+		  comPort_rec->getSettings()->getPrt()->get_bwr()->add(0x47C, form_7C_4);
+		  comPort_rec->getSettings()->getPrt()->add_msg(0x47C);
+		  comPort_rec->size_wr = comPort_rec->getSettings()->getPrt()->code(comPort_rec->bufwr);
+		  ResumeThread(comPort_rec->getTrHandle());
+		  Sleep(10);
+////////////////////////////////////////////////////////////////////////////////
+
+//		  comPort_rec->getSettings()->getPrt()->add_msg(0x7C);
+//		  comPort_rec->getSettings()->getPrt()->code(buf);
+
+}
+
+//---------------------------------------------------------------------------
+
+void __fastcall TForm1::Button12Click(TObject *Sender)
+{
+	memset(comPort_mod->bufwr,0,1024); // Очистить программный передающий буфер.
+	PurgeComm(comPort_mod->getCOM(), PURGE_TXCLEAR);
+	int i = sprintf(comPort_mod->bufwr, "%S", Form1->Edit5->Text.c_str());
+	ResumeThread(comPort_mod->getTrHandle());
+}
+//---------------------------------------------------------------------------
+
+void __fastcall TForm1::Button13Click(TObject *Sender)
+{   memset(comPort_rec->bufwr,0,1024); // Очистить программный передающий буфер.
+	PurgeComm(comPort_rec->getCOM(), PURGE_TXCLEAR);
+	int i = sprintf(comPort_rec->bufwr, "%S", Form1->Edit6->Text.c_str());
+	ResumeThread(comPort_rec->getTrHandle());
+}
+//---------------------------------------------------------------------------
+
+
+
+void __fastcall TForm1::SpeedButton5Click(TObject *Sender)
+{   if(!click_rate1)
+	  click_rate1 = 1;
+	else
+	  click_rate1 = 0;
+}
+//---------------------------------------------------------------------------
+
+void __fastcall TForm1::SpeedButton7Click(TObject *Sender)
+{   if(!click_rate2)
+	  click_rate2 = 1;
+	else
+	  click_rate2 = 0;
+}
+//---------------------------------------------------------------------------
+
+
+

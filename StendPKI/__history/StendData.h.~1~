@@ -1,0 +1,75 @@
+//---------------------------------------------------------------------------
+
+#ifndef StendDataH
+#define StendDataH
+class TestClass
+{   public: static void convert(char i, char* res);
+			static void convert(short i, char* res);
+			static void convert(int i, char* res);
+			static void convert(float i, char* res);
+			static void convert(double i, char* res);
+};
+//---------------------------------------------------------------------------
+
+
+class DataPKI {
+public:
+	DataPKI(int*,int*,int,int,int,int,int,int,int,int);
+	// пакет BINR 0x76  Изменение назначения и скорости COM - портов -   ответ BINR 0x86
+	struct _Pack_76 {
+		unsigned char modePKI_1; // режим работы порта 1 ПКИ
+		unsigned int speedPKI_1; // скорость передачи порта 1 ПКИ
+		unsigned char modePKI_2; // режим работы порта 2 ПКИ
+		unsigned int speedPKI_2; // скорость передачи порта 2 ПКИ
+	} pack_76;
+
+	// пакет BINR 0x7B Запрос параметров внутреннего тестирования  -  ответ BINR 0x8B
+	struct _Pack_7B {
+		unsigned char timeTest;
+		// интервал выдачи результатов тестирования в секундах. 0 - однократная выдача и прекращение
+	} pack_7B;
+
+	// пакет BINR 0x7C  Запрос параметров сигнала и установка настроек частоты и скорости каналов  -  ответ BINR 0x8C
+	struct _Pack_7C {
+		unsigned char timeMSS_1;
+		// интервал выдачи параметров сигнала и настроек первого канала, 0 - однократная выдача и прекращение
+		unsigned char timeMSS_2;
+		// интервал выдачи параметров сигнала и настроек второго канала, 0 - однократная выдача и прекращение
+		// для первого канала
+		unsigned char regFind_1; // режим поиска  0 - ручной, 1 - автомат
+		unsigned char freqNum_1;
+		// номер литерной частоты 0 - 283.5 ....... 83 - 325.0
+		unsigned char rateNum_1;
+		// номер скорости канала 0 - 200 ; 1 - 100 ; 2 - 50 ; 3 - 25
+		// для второго канала
+		unsigned char regFind_2; // режим поиска  0 - ручной, 1 - автомат
+		unsigned char freqNum_2;
+		// номер литерной частоты 0 - 283.5 ....... 83 - 325.0
+		unsigned char rateNum_2;
+		// номер скорости канала 0 - 200 ; 1 - 100 ; 2 - 50 ; 3 - 25
+	} pack_7C;
+
+	// пакет BINR 0x7D Запрос признака синхронизации
+	struct _Pack_7D {
+		unsigned char timeSink;
+		// интервал выдачи запроса синхронизации, 0 - однократная выдача и прекращение.
+	} pack_7D;
+
+	// пакет BINR 0x7E  Включение-выключение сканирования частотного диапазона.
+	struct _Pack_7E{
+
+	} pack_7E;
+
+	// пакет BINR 0x7F  Запрос номеров версий
+	struct _Pack_7F{
+	   unsigned char comCode;
+	} pack_7F;
+
+};
+
+class DataMSK {
+
+};
+
+
+#endif

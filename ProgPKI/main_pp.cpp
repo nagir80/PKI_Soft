@@ -1,0 +1,440 @@
+//---------------------------------------------------------------------------
+
+#include <vcl.h>
+#pragma hdrstop
+
+#include <windows.h>
+#include "main_pp.h"
+#include "ComTranceiver.h"
+#include "BINRProtocol.h"
+#include "RTCMProtocol.h"
+#include "BinFileReader.h"
+#include "FileReaderBoot.h"
+
+#include "utils.h"
+#include <iostream>
+#include <stdio.h>
+#include <string>
+#include <sstream>
+#include <fstream>
+#include <stdlib>
+#include <System.Classes.hpp>
+//---------------------------------------------------------------------------
+#pragma package(smart_init)
+#pragma resource "*.dfm"
+TForm1 *Form1;
+String portname;
+COM_Settings *comPort_set;
+COM_Tranceiver *comPort;
+COM_Tranceiver *file__;
+HANDLE wrkThread;
+HANDLE tst1Thread;
+HANDLE openFileThread;  //открытие файлов.
+
+HANDLE cP_event;
+
+HANDLE mutx;
+DWORD dwWaitResult;
+COM_Settings *port;
+String com;
+AnsiString file_name;
+//IFileReader* BinFile;
+IFileReader* BinFileBoot;
+
+char* buf_file;
+bool Exit = false;
+void synchronization(int&, int&, char*,char*,short,int&,int&);
+//------------------------------------------------------------------------------
+__fastcall TForm1::TForm1(TComponent* Owner)
+	: TForm(Owner)
+{}
+//------------------------------------------------------------------------------
+void __fastcall TForm1::FormCreate(TObject *Sender)
+{   Label10->Color=clRed;
+	Label10->Font->Color=clRed;
+	Label11->Color=clRed;
+	Label11->Font->Color=clRed;
+
+	N3->Enabled = false;
+	Button1->Enabled = false;
+
+	comboBox1->Items->AddStrings(COM_Settings::all_ports());
+
+	port = new COM_Settings(new RTCMProtocol(),
+		portname.c_str(),
+		Utils::indexToBaudes(br_combo->ItemIndex),
+		Utils::indexToDb(db_combo->ItemIndex),
+		Utils::indexToPar(par_combo->ItemIndex),
+		Utils::indexToSb(sb_combo->ItemIndex),
+		Utils::indexToFc(fc_combo->ItemIndex));
+
+	wchar_t* COM_port;
+	int speed = 0, data_bits = 0, Parity = 0, Stop_bits = 0,
+		flow_Control = 0, com_index = 0;
+
+
+	if(port->read_file(COM_port,speed,data_bits,Parity,Stop_bits,flow_Control,com_index))
+	   MessageBox ( NULL, L"Файл не найден.", L"OK", MB_OK );
+	comboBox1->ItemIndex = com_index;
+	br_combo->ItemIndex = speed;
+	db_combo->ItemIndex = data_bits;
+	par_combo->ItemIndex = Parity;
+	sb_combo->ItemIndex = Stop_bits;
+	fc_combo->ItemIndex = flow_Control;
+
+	mutx = CreateMutex(NULL, FALSE, (const wchar_t*)"fm1");
+}
+//------------------------------------------------------------------------------
+
+DWORD WINAPI openFileProc(LPVOID lpParameter)
+{   DWORD signal;
+	int *hlp = new int[9];
+	bool clue = true;
+	int ind = 0;
+	hlp[ind++] = 0x5256414C;
+	hlp[ind++] = 0x564F4B49;
+
+	BinFileBoot->set_st(ind);
+	BinFileBoot->set_param('L',hlp,ind);
+
+	while(1)
+	{
+////////////////////////////////test////////////////////////////////////////////
+        memset(comPort->bufrd,0,1024); //  test
+		while(1)
+		{   if(Exit == 1)
+		      break;
+			comPort->bufwr[0] = '0';
+			comPort->setSizeWr(1);
+			PurgeComm(comPort->getCOM(), PURGE_TXCLEAR);
+			ResumeThread(comPort->getTrHandle());
+
+			Sleep(100);
+		}
+
+///////////////////////////////end test/////////////////////////////////////////
+
+	   signal = WaitForSingleObject(cP_event,INFINITE);
+		if (signal == WAIT_OBJECT_0) {
+			static int index = 0;
+ /*
+			hlp[0] ++;
+			hlp[1] ++;
+ */
+			int key_ = BinFileBoot->open_bin_f(1024);
+
+			if(key_ >=0)
+			{   key_ = BinFileBoot->get_buf(comPort->bufwr);
+				comPort->setSizeWr(key_);
+				PurgeComm(comPort->getCOM(), PURGE_TXCLEAR);
+				ResumeThread(comPort->getTrHandle());
+				ResetEvent(cP_event);
+				continue;
+			}
+			else
+			{   BinFileBoot->clean_stor(ind);
+				BinFileBoot->set_param('R',hlp,ind-1);
+				BinFileBoot->open_bin_f(1024);
+				BinFileBoot->set_size(ind*2+1);
+				BinFileBoot->get_buf(comPort->bufwr);
+				comPort->setSizeWr(ind*2+1);
+				PurgeComm(comPort->getCOM(), PURGE_TXCLEAR);
+				ResumeThread(comPort->getTrHandle());
+				ResetEvent(cP_event);
+				delete BinFileBoot;
+				break;
+            }
+
+		}
+	}
+	return 0;
+}
+
+//------------------------------------------------------------------------------
+
+//-------------------------------test-------------------------------------------
+void synchronization(int& in_, int& out_, char* synch, char* buf_,short length,int& outnull_)
+{  char sh[] = {'\r','\n','>'}; // (0x0D,0x0A,0x3E)Синхронизация с внешним устройством.
+   /*
+   char cmd_sync[] = {0x00};    // (0)Принять и ни чего не делать
+   char cmd_cr[] = {0x0D};      // ('\r')Выдача приглашения мастеру.
+   char cmd_baud[] = {'B'};     // (0x42)Установка скорости обмена.
+   char cmd_load[] = {'L'};     // (0x4C)Загрузка массива байт в память микроконтроллера.
+   char cmd_vfy[] = {'Y'};      // (0x59)Выдача массива байт из памяти микроконтроллера.
+   char cmd_run[] = {'R'};      // (0x52) Запуск программы на выполнение.
+   //------------------Ошибки---------------------------------------------
+   char err_chn[] = {'E','i'};  // (0x45,0x69)Аппаратная ошибка UART.
+   char err_cmd[] = {'E','c'};  // (0x45,0x63)Принята неизвестная команда.(Выдаётся диспетчером команд,если принят неизвестный код команды).
+   char err_baud[] = {'E','b'}; // (0x45,0x62)Принята неизвестная команда.(Выдаётся диспетчером команд, если по принятому от Master-a значению скорости обмена невозможно вычеслить корректное значение делителя частоты UART.
+   */
+   static int within = 0;
+
+   if(length > 0)
+	 for(int j = 0; j < length; j++,in_++)
+		buf_[in_ & 0x7] = synch[j];
+   else if(length == 0)
+		{   if(within == 0)
+			{   if(strlen(buf_) == 3)
+				{   switch(memcmp(buf_,sh,3))
+					{   case 0:   outnull_ = 2; within = 1; Exit = true;
+								  break;
+						default:   outnull_ = 1;
+					}
+				}
+				else
+					outnull_ = 1;
+			}
+			else if(within == 1)
+				 {   switch(buf_[out_])
+					 {   case 0x00:   if(buf_[out_+1] != '\0')
+										 outnull_ = 4;
+									  else
+										 outnull_ = 3;
+									  break;
+						 case 0x0D:   if(buf_[out_+1] != '\0')
+										 outnull_ = 4;
+									  else
+										 outnull_ = 3;
+									  break;
+						 case 0x42:   if(buf_[out_+1] != '\0')
+										 outnull_ = 4;
+									  else
+										 outnull_ = 3;
+									  break;
+						 case 0x4C:   if(buf_[out_+1] != '\0')
+										 outnull_ = 4;
+									  else
+										 outnull_ = 3;
+									  break;
+						 case 0x59:   if(buf_[out_+1] != '\0')
+										 outnull_ = 4;
+									  else
+										 outnull_ = 3;
+									  break;
+						 case 0x52:   if(buf_[out_+1] != '\0')
+										 outnull_ = 4;
+									  else
+										 outnull_ = 3;
+									  break;
+						 case 0x45:   if(buf_[out_+1] != '\0')
+									  {   switch(buf_[out_+1])
+										  {   case 0x69:   if(buf_[out_+2] != '\0')
+															  outnull_ = 4;
+														   else
+															  outnull_ = 3;
+														   break;
+											  case 0x63:   if(buf_[out_+2] != '\0')
+															  outnull_ = 4;
+														   else
+															  outnull_ = 3;
+														   break;
+											  case 0x62:   if(buf_[out_+2] != '\0')
+															  outnull_ = 4;
+														   else
+															  outnull_ = 3;
+														   break;
+											  default:   outnull_ = 4;
+										  }
+									  }
+									  break;
+						 default:   outnull_ = 4;
+					 }
+                 }
+        }
+}
+//--------------------------------end test--------------------------------------
+
+//------------------------------------------------------------------------------
+DWORD WINAPI workProc(LPVOID lpParameter)
+{   char *hhh = 0;
+	std::string form_str;
+	//--------------test-----------------
+	 char buf[16] = {0}; DWORD temp_ = 0;
+	 int in = 0, out = 0;
+	 int outnull = 0;
+	//-----------------------------------
+   //	form_str = new  std::string();
+	while(1)
+	{   unsigned short l = comPort->getSizeRd();
+		if(l == 0)
+		{   if(in > 0)
+			   synchronization(in,out,hhh,buf,l,outnull);
+				//memset(buf,'\0',16);
+				// memset(comPort->bufrd,'\0',1024);
+				//	in = 0; out = 0; key = 0;
+		}
+		if (l > 0)
+		{   hhh = new char[100];
+			memset(hhh,'\0',100); //  test
+				  //form_str = new  std::string();
+			comPort->getFromRdBuf(hhh, l);
+				 // form_str->clear();
+				 // form_str->append(hhh,l);
+			synchronization(in,out,hhh,buf,l,outnull);
+			delete[] hhh;
+				  /*
+				  if(outnull == 1)
+				  {   Form1->Memo1->Lines->Text = Form1->Memo1->Lines->Text
+						  + buf;
+					  continue;
+				  }
+				  if(outnull == 2 && key == 0)
+				  {   Form1->Memo1->Lines->Text = Form1->Memo1->Lines->Text
+						  + "\nОшибка синхронизации";
+					  key = 1;
+				  }
+				  */
+		}
+		switch(outnull)
+		{   case 0:   break;
+
+			case 1:   Form1->Memo1->Lines->Text = Form1->Memo1->Lines->Text
+							  + "\nОшибка синхронизации";
+					  outnull = 0; in = 0;
+					  memset(buf,'\0',16);
+					  break;
+
+			case 2:   Form1->Memo1->Lines->Text = Form1->Memo1->Lines->Text + buf;
+					  outnull = 0; in = 0;
+					  memset(buf,'\0',16);
+					  break;
+
+			case 3:   Form1->Memo1->Lines->Text = Form1->Memo1->Lines->Text+"\n"+buf;
+					  outnull = 0; in = 0;
+					  memset(buf,'\0',16);
+					  break;
+
+			case 4:   Form1->Memo1->Lines->Text = Form1->Memo1->Lines->Text+"\nНеправильный символ";
+					  outnull = 0; in = 0;
+					  memset(buf,'\0',16);
+					  break;
+		}
+	    Sleep(10);
+	}
+
+
+				  /*
+				  if(outnull == 1)
+					Form1->Memo1->Lines->Text = Form1->Memo1->Lines->Text
+						+ form_str->c_str();
+				  delete form_str;
+				  */
+
+		   //	 delete form_str;
+	return 0;
+}
+//------------------------------------------------------------------------------
+
+//------------------------------------------------------------------------------
+void __fastcall TForm1::Button13Click(TObject *Sender)
+{   portname = Form1->comboBox1->Text;
+	comPort_set = new COM_Settings(new BINRProtocol(),
+		portname.c_str(),
+		Utils::indexToBaudes(br_combo->ItemIndex),
+		Utils::indexToDb(db_combo->ItemIndex),
+		Utils::indexToPar(par_combo->ItemIndex),
+		Utils::indexToSb(sb_combo->ItemIndex),
+		Utils::indexToFc(fc_combo->ItemIndex));
+
+		port = new COM_Settings(new BINRProtocol(),
+		portname.c_str(),
+		Utils::indexToBaudes(br_combo->ItemIndex),
+		Utils::indexToDb(db_combo->ItemIndex),
+		Utils::indexToPar(par_combo->ItemIndex),
+		Utils::indexToSb(sb_combo->ItemIndex),
+		Utils::indexToFc(fc_combo->ItemIndex));
+
+		if(port->write_file())
+		   MessageBox ( NULL, L"Не удалось открыть порт", L"OK", MB_OK );
+
+		cP_event = CreateEvent(NULL,TRUE,TRUE,(const wchar_t*)"FirstStep");
+		comPort = new COM_Tranceiver(comPort_set, cP_event);
+		if (comPort->getResult() != 0)
+		{
+		   TCHAR buf[100];
+		_stprintf(buf, _T("%d"), comPort->getResult());
+
+
+		   MessageBox ( NULL, buf , L"ComPort", MB_OK );
+        }
+		else
+		  {   comboBox1->Enabled = false;
+			  br_combo->Enabled = false;
+			  db_combo->Enabled = false;
+			  sb_combo->Enabled = false;
+			  par_combo->Enabled = false;
+			  fc_combo->Enabled = false;
+			  Button13->Enabled = false;
+			  Button14->Enabled = true;
+
+			  char *res = new char[100];
+			  memcpy(res, comPort_set->print(), 100);
+			  Form1->Memo1->Font->Color = clRed;
+			  Form1->Memo1->Lines->Add("=== P O R T  I S  O P E N E D ===");
+			  Form1->Memo1->Font->Color = clBlack;
+			  Form1->Memo1->Lines->Add(res);
+
+			  wrkThread = CreateThread(NULL, 0, workProc, NULL, 0, NULL);
+
+			  N3->Enabled = true;
+	}
+}
+//---------------------------------------------------------------------------
+void __fastcall TForm1::Button14Click(TObject *Sender)
+{
+   delete comPort;
+	delete comPort_set;
+     CloseHandle(cP_event);
+	//delete BinFileBoot;
+	Form1->Memo1->Font->Color = clRed;
+	Form1->Memo1->Lines->Add("=== P O R T  I S  C L O S E D ===");
+	Form1->Memo1->Font->Color = clBlack;
+	comboBox1->Enabled = true;
+	br_combo->Enabled = true;
+	db_combo->Enabled = true;
+	sb_combo->Enabled = true;
+	par_combo->Enabled = true;
+	fc_combo->Enabled = true;
+	Button13->Enabled = true;
+	Button14->Enabled = false;
+
+	TerminateThread(wrkThread, NULL);
+	CloseHandle(wrkThread);
+}
+//---------------------------------------------------------------------------
+void __fastcall TForm1::N3Click(TObject *Sender)
+{   if(Form1->FileOpenDialog1->Execute())
+	  {   file_name = Form1->FileOpenDialog1->FileName;
+		  buf_file = new char[strlen(file_name.c_str())];
+		  buf_file = file_name.c_str();
+   //		  BinFileBoot = new BinFileReader(buf_file/*,strlen(buf_file)*/);
+
+		  BinFileBoot = new FileReaderBoot(new BinFileReader(buf_file));
+
+
+		  if(!(BinFileBoot->openfile()))
+			 MessageBox ( NULL, L"Не удалось открыть файл", L"Ok", MB_OK );
+		  else
+			{   Form1->Label21->Caption = ExtractFileName(Form1->FileOpenDialog1->FileName);
+				Button1->Enabled = true;
+			}
+	  }
+	else
+	  MessageBox ( NULL, L"FileOpenDialog error", L"Ok", MB_OK );
+}
+//---------------------------------------------------------------------------
+
+//---------------------------------------------------------------------------
+void __fastcall TForm1::Button1Click(TObject *Sender)
+{   memset(comPort->bufwr,0,1024); // Очистить программный передающий буфер.
+	openFileThread = CreateThread(NULL, 0, openFileProc, NULL, 0, NULL);
+
+}
+//---------------------------------------------------------------------------
+
+void __fastcall TForm1::Button6Click(TObject *Sender)
+{   Memo1->Lines->Clear();
+}
+//---------------------------------------------------------------------------
+
+

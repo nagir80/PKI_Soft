@@ -1,0 +1,82 @@
+#include <System.hpp>
+#pragma hdrstop
+
+#include <TestFramework.hpp>
+#include "..\BINRProtocol.h"
+
+
+class TTestBINRProtocol : public TTestCase
+{
+public:
+  __fastcall virtual TTestBINRProtocol(System::String name) : TTestCase(name) {}
+  virtual void __fastcall SetUp();
+  virtual void __fastcall TearDown();
+   BINRProtocol *bp;
+__published:
+  void __fastcall Testcode();
+  void __fastcall Testdecode();
+  void __fastcall Testcheck_values();
+};
+
+
+void __fastcall TTestBINRProtocol::SetUp()
+{     bp = new BINRProtocol();
+}
+
+void __fastcall TTestBINRProtocol::TearDown()
+{    delete bp;
+}
+
+void __fastcall TTestBINRProtocol::Testcode()
+{
+  // int code(char* buf)
+
+}
+    
+void __fastcall TTestBINRProtocol::Testdecode()
+{
+  // void decode(char* buf)
+
+}
+
+    
+void __fastcall TTestBINRProtocol::Testcheck_values()
+{
+  // void check_values(char* buf_,int& index_)
+  char buf1[10] = {0x10, 0x7E, 0x1};
+  char res1[10] = {0x10, 0x7E, 0x1};
+  int i_b1 = 3;
+  bp->check_values(buf1, i_b1);
+  Check(i_b1 == 3,  "Test1 - Failed");
+  Check(memcmp(buf1, res1,i_b1)==0, "Test2 - Failed");
+
+  char buf2[10] = {0x10, 0x7E, 0x10};
+  char res2[10] = {0x10, 0x7E, 0x10, 0x10};
+  int i_b2 = 3;
+  bp->check_values(buf2, i_b2);
+  Check(i_b2 == 4,  "Test3 - Failed");
+  Check(memcmp(buf2, res2,i_b2)==0, "Test4 - Failed");
+
+  char buf3[10] = {0x10, 0x7E, 0x10, 0x10};
+  char res3[10] = {0x10, 0x7E, 0x10, 0x10, 0x10, 0x10};
+  int i_b3 = 4;
+  bp->check_values(buf3, i_b3);
+  Check(i_b3 == 6,  "Test5 - Failed");
+  Check(memcmp(buf3, res3,i_b3)==0, "Test6 - Failed");
+
+  char buf4[10] = {0x10, 0x7E, 0x10, 0x1, 0x10, 0x1};
+  char res4[10] = {0x10, 0x7E, 0x10, 0x10, 0x1, 0x10, 0x10, 0x1};
+  int i_b4 = 6;
+  bp->check_values(buf4, i_b4);
+  Check(i_b4 == 8,  "Test7 - Failed");
+  Check(memcmp(buf4, res4,i_b4)==0, "Test8 - Failed");
+
+}
+    
+
+
+static void registerTests()
+{
+  Testframework::RegisterTest(TTestBINRProtocol::Suite());
+}
+#pragma startup registerTests 33
